@@ -41,12 +41,24 @@ elif command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
   DB_MODE="docker"
   echo -e "${GREEN}Found Docker — will use containerised PostgreSQL${RESET}"
 else
-  echo -e "${RED}Error: Neither PostgreSQL nor Docker found.${RESET}"
-  echo ""
-  echo "Install one of:"
-  echo "  PostgreSQL: https://www.postgresql.org/download/"
-  echo "  Docker:     https://www.docker.com/products/docker-desktop"
-  exit 1
+  echo -e "${YELLOW}PostgreSQL and Docker not found — attempting to install PostgreSQL...${RESET}"
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y postgresql postgresql-client
+  elif command -v brew &>/dev/null; then
+    brew install postgresql@17 && brew services start postgresql@17
+    export PATH="/opt/homebrew/opt/postgresql@17/bin:/usr/local/opt/postgresql@17/bin:$PATH"
+  else
+    echo -e "${RED}Error: Cannot auto-install PostgreSQL. Please install it manually:${RESET}"
+    echo "  https://www.postgresql.org/download/"
+    exit 1
+  fi
+  if command -v psql &>/dev/null; then
+    DB_MODE="local"
+    echo -e "${GREEN}PostgreSQL installed.${RESET}"
+  else
+    echo -e "${RED}PostgreSQL installed but psql not in PATH. Open a new terminal and re-run.${RESET}"
+    exit 1
+  fi
 fi
 
 # ── .env setup ────────────────────────────────────────────────────────────────

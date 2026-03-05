@@ -54,12 +54,32 @@ if ($psqlExe) {
 }
 
 if (-not $dbMode) {
-    Write-Host "Error: Neither PostgreSQL nor Docker found." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Install one of:"
-    Write-Host "  PostgreSQL: https://www.postgresql.org/download/"
-    Write-Host "  Docker:     https://www.docker.com/products/docker-desktop"
-    exit 1
+    # Try to auto-install PostgreSQL via winget
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "PostgreSQL not found — installing via winget..." -ForegroundColor Yellow
+        winget install --id PostgreSQL.PostgreSQL.17 --silent --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: winget install failed." -ForegroundColor Red; exit 1
+        }
+        # Re-check after install
+        $psqlExe = $pgPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($psqlExe) {
+            $dbMode = "local"
+            $pgBin = Split-Path $psqlExe
+            $env:PATH = "$pgBin;$env:PATH"
+            Write-Host "PostgreSQL installed." -ForegroundColor Green
+        } else {
+            Write-Host "Error: PostgreSQL installed but psql.exe not found. Restart your terminal and re-run." -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Host "Error: Neither PostgreSQL nor Docker found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Install one of:"
+        Write-Host "  PostgreSQL: https://www.postgresql.org/download/"
+        Write-Host "  Docker:     https://www.docker.com/products/docker-desktop"
+        exit 1
+    }
 }
 
 # ── .env setup ────────────────────────────────────────────────────────────────
