@@ -1,6 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 
+export function useModels() {
+  return useQuery({
+    queryKey: [api.models.list.path],
+    queryFn: async () => {
+      const res = await fetch(api.models.list.path);
+      if (!res.ok) throw new Error("Failed to fetch models");
+      return api.models.list.responses[200].parse(await res.json());
+    },
+    staleTime: Infinity,
+  });
+}
+
 export function useConversations() {
   return useQuery({
     queryKey: [api.conversations.list.path],
@@ -63,9 +75,9 @@ export function useSendMessage() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ conversationId, content }: { conversationId: number, content: string }) => {
+    mutationFn: async ({ conversationId, content, model }: { conversationId: number, content: string, model?: string }) => {
       const url = buildUrl(api.conversations.sendMessage.path, { id: conversationId });
-      
+
       // Update cache optimistically
       queryClient.setQueryData([api.conversations.get.path, conversationId], (old: any) => {
         if (!old) return old;
@@ -82,7 +94,7 @@ export function useSendMessage() {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content, model })
       });
 
       if (!res.ok) throw new Error("Failed to send message");

@@ -4,14 +4,26 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 
-const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
-const CEREBRAS_MODEL = "gpt-oss-120b";
+const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1";
+const CEREBRAS_DEFAULT_MODEL = "gpt-oss-120b";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   
+  app.get(api.models.list.path, async (_req, res) => {
+    try {
+      const upstream = await fetch(`${CEREBRAS_BASE_URL}/models`, {
+        headers: { "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}` },
+      });
+      const data = await upstream.json() as { data: { id: string }[] };
+      res.json(data.data.map((m) => ({ id: m.id })));
+    } catch {
+      res.status(500).json({ message: "Failed to fetch models" });
+    }
+  });
+
   // Seed initial data if empty
   const existingConvos = await storage.getAllConversations();
   if (existingConvos.length === 0) {
@@ -87,15 +99,15 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      // Stream response from Perplexity
-      const upstream = await fetch(CEREBRAS_API_URL, {
+      // Stream response from Cerebras
+      const upstream = await fetch(`${CEREBRAS_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: CEREBRAS_MODEL,
+          model: input.model ?? CEREBRAS_DEFAULT_MODEL,
           messages: chatMessages,
           stream: true,
           max_tokens: 8192,

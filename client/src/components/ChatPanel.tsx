@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { useConversation, useSendMessage } from "@/hooks/use-chat";
+import { useConversation, useSendMessage, useModels } from "@/hooks/use-chat";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { Send, Terminal } from "lucide-react";
+import { Send, Terminal, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 
 export function ChatPanel({ id }: { id: number }) {
   const { data: conversation, isLoading } = useConversation(id);
+  const { data: models } = useModels();
   const sendMutation = useSendMessage();
   const [input, setInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const endRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (models?.length && !selectedModel) {
+      setSelectedModel(models.find(m => m.id === "gpt-oss-120b")?.id ?? models[0].id);
+    }
+  }, [models]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -23,7 +31,7 @@ export function ChatPanel({ id }: { id: number }) {
 
   const handleSend = () => {
     if (!input.trim() || sendMutation.isPending) return;
-    sendMutation.mutate({ conversationId: id, content: input.trim() });
+    sendMutation.mutate({ conversationId: id, content: input.trim(), model: selectedModel || undefined });
     setInput("");
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -59,6 +67,18 @@ export function ChatPanel({ id }: { id: number }) {
         <Terminal className="w-4 h-4 text-primary" />
         <span className="text-muted-foreground/70">~/sessions/</span>
         <span className="text-foreground">{conversation.title.toLowerCase().replace(/ /g, '_')}</span>
+        <div className="ml-auto relative">
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="appearance-none bg-card border border-border text-xs text-muted-foreground tracking-widest px-3 py-1.5 pr-7 rounded focus:outline-none focus:border-primary/50 cursor-pointer hover:border-primary/30 transition-colors"
+          >
+            {models?.map((m) => (
+              <option key={m.id} value={m.id}>{m.id}</option>
+            ))}
+          </select>
+          <ChevronDown className="w-3 h-3 text-muted-foreground/50 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
       </div>
 
       {/* Messages Area */}

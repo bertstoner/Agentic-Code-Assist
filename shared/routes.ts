@@ -43,9 +43,18 @@ export const api = {
     sendMessage: {
       method: "POST" as const,
       path: "/api/conversations/:id/messages" as const,
-      input: z.object({ content: z.string() }),
+      input: z.object({ content: z.string(), model: z.string().optional() }),
       responses: {
         200: z.any(), // Stream of SSE data
+      },
+    },
+  },
+  models: {
+    list: {
+      method: "GET" as const,
+      path: "/api/models" as const,
+      responses: {
+        200: z.array(z.object({ id: z.string() })),
       },
     },
   },
