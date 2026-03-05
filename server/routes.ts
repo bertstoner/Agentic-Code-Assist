@@ -3,13 +3,9 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import Anthropic from "@anthropic-ai/sdk";
 
-// Initialize Anthropic client (requires integration credentials injected by Replit)
-const anthropic = new Anthropic({
-  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
-});
+const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
+const CEREBRAS_MODEL = "qwen-3-32b";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -91,21 +87,53 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      // Stream response from Anthropic
-      const stream = anthropic.messages.stream({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
-        messages: chatMessages,
+      // Stream response from Perplexity
+      const upstream = await fetch(CEREBRAS_API_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CEREBRAS_MODEL,
+          messages: chatMessages,
+          stream: true,
+          max_tokens: 8192,
+        }),
       });
 
-      let fullResponse = "";
+      if (!upstream.ok) {
+        const err = await upstream.text();
+        throw new Error(`Cerebras API error ${upstream.status}: ${err}`);
+      }
 
-      for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          const content = event.delta.text;
-          if (content) {
-            fullResponse += content;
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      const reader = upstream.body!.getReader();
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const dataStr = trimmed.slice(6);
+          if (dataStr === "[DONE]") continue;
+          try {
+            const chunk = JSON.parse(dataStr);
+            const content: string | undefined = chunk.choices?.[0]?.delta?.content;
+            if (content) {
+              fullResponse += content;
+              res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            }
+          } catch {
+            // skip malformed chunks
           }
         }
       }
