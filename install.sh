@@ -5,6 +5,7 @@ BOLD='\033[1m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
 RESET='\033[0m'
 
 echo -e "${CYAN}${BOLD}=== Agentic Code Assist — Install ===${RESET}"
@@ -12,7 +13,7 @@ echo ""
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 
-check() {
+need() {
   if ! command -v "$1" &>/dev/null; then
     echo -e "${RED}Error: '$1' is required but not installed.${RESET}"
     echo "  $2"
@@ -20,9 +21,8 @@ check() {
   fi
 }
 
-check node  "Install Node.js 18+ from https://nodejs.org"
-check npm   "Comes with Node.js"
-check docker "Install Docker Desktop from https://www.docker.com/products/docker-desktop"
+need node "Install Node.js 18+ from https://nodejs.org"
+need npm  "Comes with Node.js"
 
 NODE_MAJOR=$(node --version | sed 's/v\([0-9]*\).*/\1/')
 if [ "$NODE_MAJOR" -lt 18 ]; then
@@ -30,10 +30,28 @@ if [ "$NODE_MAJOR" -lt 18 ]; then
   exit 1
 fi
 
+# ── Database — prefer local PostgreSQL, fall back to Docker ───────────────────
+
+DB_MODE=""
+
+if command -v psql &>/dev/null && command -v pg_isready &>/dev/null; then
+  DB_MODE="local"
+  echo -e "${GREEN}Found local PostgreSQL${RESET}"
+elif command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+  DB_MODE="docker"
+  echo -e "${GREEN}Found Docker — will use containerised PostgreSQL${RESET}"
+else
+  echo -e "${RED}Error: Neither PostgreSQL nor Docker found.${RESET}"
+  echo ""
+  echo "Install one of:"
+  echo "  PostgreSQL: https://www.postgresql.org/download/"
+  echo "  Docker:     https://www.docker.com/products/docker-desktop"
+  exit 1
+fi
+
 # ── .env setup ────────────────────────────────────────────────────────────────
 
 if [ ! -f .env ]; then
-  echo "Setting up environment configuration..."
   echo ""
   read -rp "Enter your Cerebras API key (from https://console.cerebras.ai): " API_KEY
   if [ -z "$API_KEY" ]; then
@@ -41,70 +59,76 @@ if [ ! -f .env ]; then
     exit 1
   fi
 
-  sed "s|your-api-key-here|${API_KEY}|g" .env.example > .env
+  if [ "$DB_MODE" = "local" ]; then
+    DB_URL="postgresql://postgres:postgres@localhost:5432/agentcodeassist"
+    echo ""
+    echo -e "${YELLOW}Using local PostgreSQL.${RESET}"
+    echo "Default DATABASE_URL: $DB_URL"
+    read -rp "Press Enter to accept or type a custom DATABASE_URL: " CUSTOM_URL
+    [ -n "$CUSTOM_URL" ] && DB_URL="$CUSTOM_URL"
+  else
+    DB_URL="postgresql://postgres:postgres@localhost:5432/agentcodeassist"
+  fi
+
+  sed "s|your-api-key-here|${API_KEY}|g" .env.example \
+    | sed "s|postgresql://.*|${DB_URL}|g" > .env
+
   echo -e "${GREEN}Created .env${RESET}"
 else
   echo ".env already exists — skipping."
 fi
 
-echo ""
+# Load env
+set -a; source .env; set +a
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Start database ─────────────────────────────────────────────────────────────
 
-echo "Starting PostgreSQL..."
+if [ "$DB_MODE" = "docker" ]; then
+  DC="docker compose"
+  command -v "docker-compose" &>/dev/null && ! docker compose version &>/dev/null 2>&1 && DC="docker-compose"
 
-# Support both docker compose (v2) and docker-compose (v1)
-DC="docker compose"
-if ! docker compose version &>/dev/null 2>&1; then
-  DC="docker-compose"
+  echo ""
+  echo "Starting PostgreSQL container..."
+  $DC up -d db
+
+  echo -n "Waiting for PostgreSQL"
+  for i in $(seq 1 30); do
+    $DC exec -T db pg_isready -U postgres &>/dev/null 2>&1 && echo -e " ${GREEN}ready${RESET}" && break
+    echo -n "."; sleep 2
+    [ "$i" -eq 30 ] && echo "" && echo -e "${RED}Timed out waiting for PostgreSQL.${RESET}" && exit 1
+  done
+
+elif [ "$DB_MODE" = "local" ]; then
+  echo ""
+  # Try to create the database if it doesn't exist
+  if ! psql "$DATABASE_URL" -c '\q' &>/dev/null 2>&1; then
+    echo "Creating database..."
+    createdb agentcodeassist 2>/dev/null || true
+  fi
+  echo -e "${GREEN}Local PostgreSQL ready${RESET}"
 fi
-
-$DC up -d db
-
-echo -n "Waiting for PostgreSQL to be ready"
-for i in $(seq 1 30); do
-  if $DC exec -T db pg_isready -U postgres &>/dev/null 2>&1; then
-    echo -e " ${GREEN}ready${RESET}"
-    break
-  fi
-  echo -n "."
-  sleep 2
-  if [ "$i" -eq 30 ]; then
-    echo ""
-    echo -e "${RED}Error: PostgreSQL did not become ready in time.${RESET}"
-    exit 1
-  fi
-done
-
-echo ""
 
 # ── Node dependencies ─────────────────────────────────────────────────────────
 
+echo ""
 echo "Installing Node.js dependencies..."
 npm install
+
+# ── Schema ────────────────────────────────────────────────────────────────────
+
 echo ""
-
-# ── Database schema ───────────────────────────────────────────────────────────
-
 echo "Applying database schema..."
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
 npm run db:push
-echo ""
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
+echo ""
 echo "Building application..."
 npm run build
-echo ""
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
-echo -e "${GREEN}${BOLD}Installation complete!${RESET}"
 echo ""
-echo "  Start (production):  npm start"
-echo "  Start (development): npm run dev"
-echo "  Stop database:       docker compose down"
+echo -e "${GREEN}${BOLD}Done! Run with: npm start${RESET}"
+echo "Then open http://localhost:${PORT:-5000}"
 echo ""
