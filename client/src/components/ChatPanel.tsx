@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useConversation, useSendMessage, useModels } from "@/hooks/use-chat";
+import { useConversation, useSendMessage, useModels, useStatus } from "@/hooks/use-chat";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { Send, Terminal, ChevronDown } from "lucide-react";
+import { Send, Terminal, ChevronDown, Wifi, WifiOff } from "lucide-react";
 import { format } from "date-fns";
 
 export function ChatPanel({ id }: { id: number }) {
   const { data: conversation, isLoading } = useConversation(id);
   const { data: models } = useModels();
+  const { data: status } = useStatus();
   const sendMutation = useSendMessage();
   const [input, setInput] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -67,6 +68,18 @@ export function ChatPanel({ id }: { id: number }) {
         <Terminal className="w-4 h-4 text-primary" />
         <span className="text-muted-foreground/70">~/sessions/</span>
         <span className="text-foreground">{conversation.title.toLowerCase().replace(/ /g, '_')}</span>
+        {status ? (
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold tracking-widest border ${
+            status.online
+              ? "text-green-400 border-green-400/30 bg-green-400/10"
+              : "text-yellow-400 border-yellow-400/30 bg-yellow-400/10"
+          }`}>
+            {status.online
+              ? <><Wifi className="w-3 h-3" /> ONLINE · CEREBRAS</>
+              : <><WifiOff className="w-3 h-3" /> OFFLINE · OLLAMA</>
+            }
+          </div>
+        ) : null}
         <div className="ml-auto relative">
           <select
             value={selectedModel}

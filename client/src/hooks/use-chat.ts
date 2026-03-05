@@ -1,6 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 
+export function useStatus() {
+  return useQuery({
+    queryKey: [api.status.get.path],
+    queryFn: async () => {
+      const res = await fetch(api.status.get.path);
+      if (!res.ok) throw new Error("Failed to fetch status");
+      return api.status.get.responses[200].parse(await res.json());
+    },
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  });
+}
+
 export function useModels() {
   return useQuery({
     queryKey: [api.models.list.path],
@@ -9,7 +22,8 @@ export function useModels() {
       if (!res.ok) throw new Error("Failed to fetch models");
       return api.models.list.responses[200].parse(await res.json());
     },
-    staleTime: Infinity,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 

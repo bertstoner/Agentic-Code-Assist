@@ -6,19 +6,59 @@ import { z } from "zod";
 
 const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1";
 const CEREBRAS_DEFAULT_MODEL = "gpt-oss-120b";
+const OLLAMA_BASE_URL = "http://localhost:11434/v1";
+const OLLAMA_DEFAULT_MODEL = "llama3.2";
+
+let _onlineCache: { value: boolean; ts: number } | null = null;
+
+async function checkOnline(): Promise<boolean> {
+  const now = Date.now();
+  if (_onlineCache && now - _onlineCache.ts < 10_000) {
+    return _onlineCache.value;
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${CEREBRAS_BASE_URL}/models`, {
+      signal: controller.signal,
+      headers: { "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}` },
+    });
+    clearTimeout(timeout);
+    _onlineCache = { value: res.ok, ts: now };
+  } catch {
+    _onlineCache = { value: false, ts: now };
+  }
+  return _onlineCache!.value;
+}
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   
+  app.get(api.status.get.path, async (_req, res) => {
+    const online = await checkOnline();
+    res.json({ online, backend: online ? "cerebras" : "ollama" });
+  });
+
   app.get(api.models.list.path, async (_req, res) => {
     try {
-      const upstream = await fetch(`${CEREBRAS_BASE_URL}/models`, {
-        headers: { "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}` },
-      });
-      const data = await upstream.json() as { data: { id: string }[] };
-      res.json(data.data.map((m) => ({ id: m.id })));
+      const online = await checkOnline();
+      if (online) {
+        const upstream = await fetch(`${CEREBRAS_BASE_URL}/models`, {
+          headers: { "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}` },
+        });
+        const data = await upstream.json() as { data: { id: string }[] };
+        res.json(data.data.map((m) => ({ id: m.id })));
+      } else {
+        try {
+          const upstream = await fetch(`${OLLAMA_BASE_URL}/models`);
+          const data = await upstream.json() as { data: { id: string }[] };
+          res.json(data.data.map((m) => ({ id: m.id })));
+        } catch {
+          res.json([{ id: OLLAMA_DEFAULT_MODEL }]);
+        }
+      }
     } catch {
       res.status(500).json({ message: "Failed to fetch models" });
     }
@@ -99,15 +139,18 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      // Stream response from Cerebras
-      const upstream = await fetch(`${CEREBRAS_BASE_URL}/chat/completions`, {
+      // Route to Cerebras (online) or Ollama (offline)
+      const online = await checkOnline();
+      const baseUrl = online ? CEREBRAS_BASE_URL : OLLAMA_BASE_URL;
+      const defaultModel = online ? CEREBRAS_DEFAULT_MODEL : OLLAMA_DEFAULT_MODEL;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (online) headers["Authorization"] = `Bearer ${process.env.CEREBRAS_API_KEY}`;
+
+      const upstream = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({
-          model: input.model ?? CEREBRAS_DEFAULT_MODEL,
+          model: input.model ?? defaultModel,
           messages: chatMessages,
           stream: true,
           max_tokens: 8192,
@@ -116,7 +159,7 @@ export async function registerRoutes(
 
       if (!upstream.ok) {
         const err = await upstream.text();
-        throw new Error(`Cerebras API error ${upstream.status}: ${err}`);
+        throw new Error(`${online ? "Cerebras" : "Ollama"} API error ${upstream.status}: ${err}`);
       }
 
       const reader = upstream.body!.getReader();

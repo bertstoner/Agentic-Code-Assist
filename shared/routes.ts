@@ -58,6 +58,15 @@ export const api = {
       },
     },
   },
+  status: {
+    get: {
+      method: "GET" as const,
+      path: "/api/status" as const,
+      responses: {
+        200: z.object({ online: z.boolean(), backend: z.enum(["cerebras", "ollama"]) }),
+      },
+    },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {
