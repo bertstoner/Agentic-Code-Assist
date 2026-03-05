@@ -5,7 +5,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 
 const CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions";
-const CEREBRAS_MODEL = "qwen-3-32b";
+const CEREBRAS_MODEL = "gpt-oss-120b";
 
 export async function registerRoutes(
   httpServer: Server,
